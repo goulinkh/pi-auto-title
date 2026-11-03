@@ -101,6 +101,8 @@ export interface TitlePreferences {
 	language?: string;
 	/** The most words a title may have, as written; read with titleWords. */
 	words?: string;
+	/** When to title, as written; read with updatesEveryTurn. */
+	update?: string;
 }
 
 /**
@@ -120,6 +122,7 @@ export function resolvePreferences(
 		model: pick(higher.model, lower.model),
 		language: pick(higher.language, lower.language),
 		words: pick(higher.words, lower.words),
+		update: pick(higher.update, lower.update),
 	};
 }
 
@@ -180,6 +183,14 @@ export function maxLengthFromEnv(value: string | undefined): number {
  */
 export function titleWords(value: string | undefined): number {
 	return positiveInteger(value) ?? DEFAULT_WORDS;
+}
+
+/**
+ * Whether to title again after every settled turn ("turn", the default)
+ * or only after the first one ("once"). Anything else means the default.
+ */
+export function updatesEveryTurn(value: string | undefined): boolean {
+	return value?.trim().toLowerCase() !== "once";
 }
 
 /** A written number rounded down, or null when it is not a positive one. */

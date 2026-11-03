@@ -21,7 +21,7 @@ export function configPath(): string {
 
 /** The preferences the config file states, or none when it says nothing usable. */
 export function loadPreferences(): TitlePreferences {
-	const none: TitlePreferences = { model: undefined, language: undefined, words: undefined };
+	const none: TitlePreferences = { model: undefined, language: undefined, words: undefined, update: undefined };
 
 	try {
 		const parsed: unknown = JSON.parse(readFileSync(configPath(), "utf8"));
@@ -34,6 +34,7 @@ export function loadPreferences(): TitlePreferences {
 			model: asWritten(record.model),
 			language: asWritten(record.language),
 			words: asWritten(typeof record.words === "number" ? String(record.words) : record.words),
+			update: asWritten(record.update),
 		};
 	} catch {
 		return none;
@@ -48,7 +49,7 @@ export function loadPreferences(): TitlePreferences {
 export function savePreferences(patch: TitlePreferences): TitlePreferences {
 	const next: TitlePreferences = { ...loadPreferences() };
 
-	for (const key of ["model", "language", "words"] as const) {
+	for (const key of ["model", "language", "words", "update"] as const) {
 		if (key in patch) {
 			const value = patch[key]?.trim();
 			if (value) {
@@ -76,6 +77,10 @@ export function savePreferences(patch: TitlePreferences): TitlePreferences {
 	if (next.words) {
 		const words = Number(next.words);
 		written.words = Number.isFinite(words) ? words : next.words;
+	}
+
+	if (next.update) {
+		written.update = next.update;
 	}
 
 	const temp = `${path}.tmp-${process.pid}`;

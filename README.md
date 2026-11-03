@@ -4,9 +4,11 @@ Gives an unnamed Pi session a name, without ever getting in the way.
 
 The extension waits until the agent's first turn has settled — the reply is
 already on screen — and only then asks a model for a short title from the
-opening exchange. The first message is never delayed, blocked, or rewritten.
-Titles are short (the model is asked for at most 4 words by default), so
-they still fit where a terminal shows its title, such as a tab.
+opening exchange. After every later turn it updates the title to what the
+session is working on now, keeping it when it still fits. No message is
+ever delayed, blocked, or rewritten. Titles are short (the model is asked
+for at most 4 words by default), so they still fit where a terminal shows
+its title, such as a tab.
 
 ## Install
 
@@ -20,14 +22,21 @@ Some auto-title extensions generate the name inside `input` or
 `before_agent_start`, which means every first message of every session waits
 for an extra model round-trip before the agent even sees it. This extension
 hooks `agent_settled` instead: by the time it does anything, the turn it
-names is already over. Generation failures are silent — a session that cannot
+names is already over. Updating after every turn costs one small model call
+per turn; `/title-model` can point it at a cheap model, and the `update`
+preference can turn it off. Generation failures are silent — a session that cannot
 be titled keeps whatever name it has, including none.
 
 ## Behavior
 
 - A session with a name is never renamed automatically: `--name`, `/name`,
-  and names from a resumed session are all respected.
-- Each session is titled at most once, after its first settled turn.
+  and names a resumed session got elsewhere are all respected. A resumed
+  session this extension titled (its generation records say so) keeps
+  being updated.
+- An unnamed session is titled after its first settled turn. After every
+  later one, the model sees the current title, the opening prompt and the
+  latest exchange, and keeps the title unless the work has moved on. With
+  `"update": "once"` the first title stays.
 - If you rename the session yourself afterwards, the extension stands down
   for the rest of that session and never touches the name again.
 - `/retitle` regenerates the title on demand, even after you renamed the
@@ -58,6 +67,9 @@ These commands set the persistent preferences from inside Pi:
 - `/title-status` — show the preferences in effect and the most
   recent generation record in this session.
 
+When titles update — after every turn, or once — is set in the config
+file or the environment only (`update` below).
+
 ## Generation records
 
 Every generation attempt leaves a `pi-auto-title` entry in the
@@ -74,7 +86,7 @@ Choices are stored in the extension's own file,
 Pi's `settings.json`:
 
 ```json
-{ "model": "openrouter/deepseek/deepseek-chat", "language": "en", "words": 3 }
+{ "model": "openrouter/deepseek/deepseek-chat", "language": "en", "words": 3, "update": "turn" }
 ```
 
 Every key is optional, and the file may be edited by hand — it is
@@ -82,7 +94,7 @@ re-read whenever a title is generated. If the file is a symlink (kept
 in a dotfiles repository, say), the commands write through it and
 leave the link in place. Resolution is key by key:
 an environment variable beats the config file, which beats the
-default (the session model; the conversation's language; 4 words).
+default (the session model; the conversation's language; 4 words; every turn).
 
 | Variable                 | Default | Description                                                        |
 | ------------------------ | ------- | ------------------------------------------------------------------ |
@@ -90,6 +102,7 @@ default (the session model; the conversation's language; 4 words).
 | `PI_AUTO_TITLE_MODEL`    | unset   | `provider/model-id` to title with; overrides the config file.      |
 | `PI_AUTO_TITLE_LANGUAGE` | unset   | Language to title in (`en`, `zh`, `Japanese`, …); overrides the config file. |
 | `PI_AUTO_TITLE_WORDS`    | `4`     | Most words the model is asked to use; overrides the config file.   |
+| `PI_AUTO_TITLE_UPDATE`   | `turn`  | `turn` updates the title after every turn, `once` titles only after the first; overrides the config file. |
 | `PI_AUTO_TITLE_MAX_LENGTH` | `60`  | Hard cap on title length in characters, cut mid-word if reached.   |
 
 ## Development
@@ -102,4 +115,5 @@ npm run check  # tsc --noEmit
 
 `src/policy.ts` is pure logic and fully unit-tested. `src/generate.ts`
 does the single model call with a 15-second timeout. `src/extension.ts`
-is wiring only: events, the per-session state machine, and `/retitle`.
+is wiring only: events, the per-session state machine, and the commands;
+`test/extension.test.ts` drives the state machine through a fake session.

@@ -30,12 +30,12 @@ describe("config file", () => {
 	});
 
 	it("reads a missing file as no preferences", () => {
-		assert.deepEqual(loadPreferences(), { model: undefined, language: undefined, words: undefined });
+		assert.deepEqual(loadPreferences(), { model: undefined, language: undefined, words: undefined, update: undefined });
 	});
 
 	it("round-trips what it saves", () => {
 		savePreferences({ model: "mock/mock-1", language: "zh" });
-		assert.deepEqual(loadPreferences(), { model: "mock/mock-1", language: "zh", words: undefined });
+		assert.deepEqual(loadPreferences(), { model: "mock/mock-1", language: "zh", words: undefined, update: undefined });
 		assert.deepEqual(JSON.parse(readFileSync(configPath(), "utf8")), {
 			model: "mock/mock-1",
 			language: "zh",
@@ -45,10 +45,10 @@ describe("config file", () => {
 	it("keeps unpatched keys and removes cleared ones", () => {
 		savePreferences({ model: "mock/mock-1", language: "zh" });
 		savePreferences({ language: "en" });
-		assert.deepEqual(loadPreferences(), { model: "mock/mock-1", language: "en", words: undefined });
+		assert.deepEqual(loadPreferences(), { model: "mock/mock-1", language: "en", words: undefined, update: undefined });
 
 		savePreferences({ model: undefined });
-		assert.deepEqual(loadPreferences(), { model: undefined, language: "en", words: undefined });
+		assert.deepEqual(loadPreferences(), { model: undefined, language: "en", words: undefined, update: undefined });
 	});
 
 	it("stores the word limit as a number and reads it back", () => {
@@ -56,8 +56,14 @@ describe("config file", () => {
 		assert.deepEqual(JSON.parse(readFileSync(configPath(), "utf8")), { words: 3 });
 		assert.equal(loadPreferences().words, "3");
 
-		savePreferences({ words: undefined });
+		savePreferences({ words: undefined, update: undefined });
 		assert.deepEqual(JSON.parse(readFileSync(configPath(), "utf8")), {});
+	});
+
+	it("round-trips when to update", () => {
+		savePreferences({ update: "once" });
+		assert.deepEqual(JSON.parse(readFileSync(configPath(), "utf8")), { update: "once" });
+		assert.equal(loadPreferences().update, "once");
 	});
 
 	it("reads a word limit written as a string too", () => {
@@ -77,6 +83,6 @@ describe("config file", () => {
 
 	it("reads a malformed file as no preferences", () => {
 		writeFileSync(configPath(), "{ not json", "utf8");
-		assert.deepEqual(loadPreferences(), { model: undefined, language: undefined, words: undefined });
+		assert.deepEqual(loadPreferences(), { model: undefined, language: undefined, words: undefined, update: undefined });
 	});
 });

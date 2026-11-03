@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { generateTitle, titleSystemPrompt } from "../src/generate.ts";
+import { generateTitle, titleSystemPrompt, titleUserMessage } from "../src/generate.ts";
 
 describe("titleSystemPrompt", () => {
 	it("follows the conversation when no language is named", () => {
@@ -22,6 +22,33 @@ describe("titleSystemPrompt", () => {
 	it("asks for the configured number of words", () => {
 		assert.match(titleSystemPrompt(null, 6), /at most 6 words/);
 		assert.match(titleSystemPrompt("English", 1), /a single word/);
+	});
+
+	it("asks to keep a current title that still fits", () => {
+		assert.doesNotMatch(titleSystemPrompt(null), /current title/);
+		assert.match(titleSystemPrompt(null, 4, true), /current title unchanged if it still fits/);
+	});
+});
+
+describe("titleUserMessage", () => {
+	it("shows a first exchange as the conversation", () => {
+		assert.equal(
+			titleUserMessage({ first: { prompt: "Fix login", reply: "Fixed it" } }),
+			"Conversation to title:\n\nUser: Fix login\n\nAssistant: Fixed it",
+		);
+	});
+
+	it("shows the current title, how the session started and the latest exchange", () => {
+		assert.equal(
+			titleUserMessage({
+				first: { prompt: "Fix login", reply: "Fixed it" },
+				latest: { prompt: "Now the signup form", reply: "Done" },
+				currentTitle: "Login fix",
+			}),
+			"Current title: Login fix\n\n" +
+				"How the session started:\n\nUser: Fix login\n\n" +
+				"Latest exchange:\n\nUser: Now the signup form\n\nAssistant: Done",
+		);
 	});
 });
 
@@ -71,7 +98,7 @@ describe("generateTitle outcomes", () => {
 	it("reports a named model that does not exist, without calling anything", async () => {
 		const ctx = fakeContext({ models: {}, sessionModel: "mock/session" });
 		const result = await generateTitle(ctx, {
-			promptText: "hello",
+			first: { prompt: "hello" },
 			modelOverride: "nope/nope-1",
 		});
 
@@ -87,7 +114,7 @@ describe("generateTitle outcomes", () => {
 			sessionModel: "mock/session",
 		});
 		const result = await generateTitle(ctx, {
-			promptText: "hello",
+			first: { prompt: "hello" },
 			modelOverride: "mock/mock-1",
 		});
 
@@ -107,7 +134,7 @@ describe("generateTitle outcomes", () => {
 			}),
 		});
 		const result = await generateTitle(ctx, {
-			promptText: "hello",
+			first: { prompt: "hello" },
 			modelOverride: "mock/mock-1",
 		});
 
@@ -128,7 +155,7 @@ describe("generateTitle outcomes", () => {
 			},
 		});
 		const result = await generateTitle(ctx, {
-			promptText: "hello",
+			first: { prompt: "hello" },
 			modelOverride: "mock/mock-1",
 			words: "2",
 		});
@@ -145,7 +172,7 @@ describe("generateTitle outcomes", () => {
 			},
 		});
 		const result = await generateTitle(ctx, {
-			promptText: "hello",
+			first: { prompt: "hello" },
 			modelOverride: "mock/mock-1",
 		});
 
@@ -164,7 +191,7 @@ describe("generateTitle outcomes", () => {
 			}),
 		});
 		const result = await generateTitle(ctx, {
-			promptText: "hello",
+			first: { prompt: "hello" },
 			modelOverride: "mock/mock-1",
 		});
 

@@ -8,6 +8,7 @@ import {
 	resolvePreferences,
 	sanitizeTitle,
 	titleWords,
+	updatesEveryTurn,
 } from "../src/policy.ts";
 
 describe("sanitizeTitle", () => {
@@ -124,6 +125,16 @@ describe("titleWords", () => {
 	});
 });
 
+describe("updatesEveryTurn", () => {
+	it("updates after every turn unless told once", () => {
+		assert.equal(updatesEveryTurn(undefined), true);
+		assert.equal(updatesEveryTurn("turn"), true);
+		assert.equal(updatesEveryTurn("something else"), true);
+		assert.equal(updatesEveryTurn("once"), false);
+		assert.equal(updatesEveryTurn(" Once "), false);
+	});
+});
+
 describe("languageName", () => {
 	it("leaves unset and auto to the conversation", () => {
 		assert.equal(languageName(undefined), null);
@@ -154,23 +165,24 @@ describe("resolvePreferences", () => {
 				{ model: "a/b" },
 				{ model: "c/d", language: "zh" },
 			),
-			{ model: "a/b", language: "zh", words: undefined },
+			{ model: "a/b", language: "zh", words: undefined, update: undefined },
 		);
 		assert.deepEqual(
 			resolvePreferences({ words: "2" }, { words: "5", language: "en" }),
-			{ model: undefined, language: "en", words: "2" },
+			{ model: undefined, language: "en", words: "2", update: undefined },
 		);
 	});
 
 	it("treats blank values as unset", () => {
 		assert.deepEqual(
 			resolvePreferences({ language: "  " }, { language: "en" }),
-			{ model: undefined, language: "en", words: undefined },
+			{ model: undefined, language: "en", words: undefined, update: undefined },
 		);
 		assert.deepEqual(resolvePreferences({}, {}), {
 			model: undefined,
 			language: undefined,
 			words: undefined,
+			update: undefined,
 		});
 	});
 });

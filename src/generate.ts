@@ -18,25 +18,45 @@ import {
 /**
  * The instruction the titling model works under. A named language pins
  * the title's language; null leaves it to follow the conversation.
- * `words` is the most words the title may have.
+ * `words` is the most words the title may have. `hasTitle`: the session
+ * has a title already, which stays unless the work has moved on.
  */
-export function titleSystemPrompt(language: string | null, words: number = DEFAULT_WORDS): string {
+export function titleSystemPrompt(
+	language: string | null,
+	words: number = DEFAULT_WORDS,
+	hasTitle = false,
+): string {
 	const inLanguage = language
 		? `Write the title in ${language}.`
 		: "Use the same language as the user's message.";
 	const length = words === 1 ? "a single word" : `at most ${words} words`;
+	const current = hasTitle
+		? "The session has a title already. Name what it is working on now, " +
+			"going by the latest exchange, and reply with the current title " +
+			"unchanged if it still fits. "
+		: "";
 
 	return (
-		`Name this chat session. Reply with ONLY a title of ${length}; ` +
+		`Name this chat session. ${current}Reply with ONLY a title of ${length}; ` +
 		"count them, never more. Write it like a tab label: the fewest " +
 		`words that say what the work is, without articles or filler. ${inLanguage} ` +
 		"No quotation marks, no trailing punctuation, no explanation."
 	);
 }
 
+/** One user prompt and the reply it got, each bounded by the caller. */
+export interface Exchange {
+	prompt: string;
+	reply?: string;
+}
+
 export interface GenerateInput {
-	promptText: string;
-	replyText?: string;
+	/** How the session started. */
+	first: Exchange;
+	/** The most recent exchange, when there has been more than one. */
+	latest?: Exchange;
+	/** The title the session has now, to keep if it still fits. */
+	currentTitle?: string;
 	modelOverride?: string;
 	/** Raw language preference; normalized by languageName. */
 	language?: string;
@@ -96,7 +116,11 @@ export async function generateTitle(
 		const response = await ctx.modelRegistry.complete(
 			model,
 			{
-				systemPrompt: titleSystemPrompt(languageName(input.language), titleWords(input.words)),
+				systemPrompt: titleSystemPrompt(
+					languageName(input.language),
+					titleWords(input.words),
+					Boolean(input.currentTitle),
+				),
 				messages: [
 					{
 						role: "user",
@@ -182,11 +206,18 @@ function resolveTitleModel(
 	return { model, requested: `${model.provider}/${model.id}` };
 }
 
-function titleUserMessage(input: GenerateInput): string {
-	let message = `Conversation to title:\n\nUser: ${input.promptText}`;
-	if (input.replyText) {
-		message += `\n\nAssistant: ${input.replyText}`;
-	}
+/**
+ * What the titling model reads: the current title, if any, then how the
+ * session started and, once there has been more than one, the latest
+ * exchange.
+ */
+export function titleUserMessage(input: GenerateInput): string {
+	const exchange = ({ prompt, reply }: Exchange) =>
+		`User: ${prompt}` + (reply ? `\n\nAssistant: ${reply}` : "");
+	const current = input.currentTitle ? `Current title: ${input.currentTitle}\n\n` : "";
 
-	return message;
+	return input.latest
+		? `${current}How the session started:\n\nUser: ${input.first.prompt}\n\n` +
+				`Latest exchange:\n\n${exchange(input.latest)}`
+		: `${current}Conversation to title:\n\n${exchange(input.first)}`;
 }

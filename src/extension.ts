@@ -4,7 +4,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { configPath, loadPreferences, savePreferences } from "./config.ts";
-import { generateTitle, type GenerationResult } from "./generate.ts";
+import { generateTitle, type Exchange, type GenerationResult } from "./generate.ts";
 import { buildModelItems, pickModel, SESSION_MODEL_VALUE } from "./model-picker.ts";
 import {
 	isEnabled,
@@ -16,18 +16,21 @@ import {
 	resolvePreferences,
 	type TitlePreferences,
 	titleWords,
+	updatesEveryTurn,
 } from "./policy.ts";
 
 const ENABLE_ENV = "PI_AUTO_TITLE";
 const MODEL_ENV = "PI_AUTO_TITLE_MODEL";
 const LANGUAGE_ENV = "PI_AUTO_TITLE_LANGUAGE";
 const WORDS_ENV = "PI_AUTO_TITLE_WORDS";
+const UPDATE_ENV = "PI_AUTO_TITLE_UPDATE";
 
 /** The environment variable that states each preference. */
 const PREFERENCE_ENV: Record<keyof TitlePreferences, string> = {
 	model: MODEL_ENV,
 	language: LANGUAGE_ENV,
 	words: WORDS_ENV,
+	update: UPDATE_ENV,
 };
 
 /** Per-session state. Reset whenever a session starts. */
@@ -47,8 +50,14 @@ function freshState(): TitlerState {
 export default function (pi: ExtensionAPI) {
 	const state = freshState();
 
-	pi.on("session_start", () => {
+	pi.on("session_start", (_event, ctx) => {
 		Object.assign(state, freshState());
+		// A resumed or reloaded session whose name this extension gave it
+		// stays this extension's to update; any other name is the user's.
+		const name = pi.getSessionName();
+		if (name && name === lastAppliedTitle(ctx)) {
+			state.titledByMe = name;
+		}
 	});
 
 	// The agent has finished its turn: the reply is delivered and nothing is
@@ -78,18 +87,14 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const excerpt = conversationExcerpt(ctx);
-			if (excerpt.prompt === "") {
+			if (!excerpt) {
 				ctx.ui.notify("Nothing to title yet — say something first.", "warning");
 				return;
 			}
 
 			state.inFlight = true;
 			try {
-				const result = await generateTitle(ctx, {
-					promptText: excerpt.prompt,
-					replyText: excerpt.reply,
-					...preferenceInput(),
-				});
+				const result = await generateTitle(ctx, { ...excerpt, ...preferenceInput() });
 				recordGeneration(pi, "retitle", result, result.title !== null);
 
 				if (!result.title) {
@@ -100,9 +105,10 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 
-				pi.setSessionName(result.title);
+				// Ours before it is set: Pi reports the change while setting it.
 				state.titledByMe = result.title;
 				state.stoodDown = false;
+				pi.setSessionName(result.title);
 				ctx.ui.notify(`Session titled: ${result.title}`, "info");
 			} finally {
 				state.inFlight = false;
@@ -169,7 +175,13 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("title-status", {
 		description: "Show the titling preferences and the last generation record",
 		handler: async (_args, ctx) => {
-			const lines = [modelStatus(), languageStatus(), wordsStatus(), `Config file: ${configPath()}`];
+			const lines = [
+				modelStatus(),
+				languageStatus(),
+				wordsStatus(),
+				updateStatus(),
+				`Config file: ${configPath()}`,
+			];
 			const record = lastRecord(ctx);
 
 			if (!record) {
@@ -272,6 +284,11 @@ function preferenceInput(): { modelOverride?: string; language?: string; words?:
 	return { modelOverride: prefs.model, language: prefs.language, words: prefs.words };
 }
 
+/** Whether titles update after every turn: environment over config file. */
+function titlesEveryTurn(): boolean {
+	return updatesEveryTurn(resolvePreferences({ update: process.env[UPDATE_ENV] }, loadPreferences()).update);
+}
+
 /** Which layer states a preference: the environment, the file, or neither. */
 function preferenceSource(key: keyof TitlePreferences): string {
 	if (process.env[PREFERENCE_ENV[key]]?.trim()) {
@@ -310,41 +327,59 @@ function wordsStatus(): string {
 	return `Title words: at most ${titleWords(prefs.words)} (from ${preferenceSource("words")})`;
 }
 
-/** Title once, after the first settled turn, then never again on its own. */
+function updateStatus(): string {
+	const when = titlesEveryTurn() ? "after every turn" : "once, after the first turn";
+
+	return `Title updates: ${when} (from ${preferenceSource("update")})`;
+}
+
+/**
+ * Title an unnamed session after its first settled turn and, unless the
+ * preference says once, update that title after every later one. A name
+ * this extension didn't give is never touched.
+ */
 async function settleTitling(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	state: TitlerState,
 ): Promise<void> {
-	if (state.stoodDown || state.inFlight || state.titledByMe) {
+	if (state.stoodDown || state.inFlight) {
 		return;
 	}
 
-	if (pi.getSessionName()) {
+	const before = pi.getSessionName();
+	if (before && before !== state.titledByMe) {
+		return;
+	}
+
+	if (state.titledByMe && !titlesEveryTurn()) {
 		return;
 	}
 
 	const excerpt = conversationExcerpt(ctx);
-	if (excerpt.prompt === "") {
+	if (!excerpt) {
 		return;
 	}
 
 	state.inFlight = true;
 	try {
 		const result = await generateTitle(ctx, {
-			promptText: excerpt.prompt,
-			replyText: excerpt.reply,
+			...excerpt,
+			currentTitle: state.titledByMe ?? undefined,
 			...preferenceInput(),
 		});
-		const applied = result.title !== null && !pi.getSessionName();
+		// The name must still be what it was: the user may have taken over
+		// while the title was being generated.
+		const applied = result.title !== null && !state.stoodDown && pi.getSessionName() === before;
 		recordGeneration(pi, "auto", result, applied);
 
-		if (!applied || !result.title) {
+		if (!applied || !result.title || result.title === before) {
 			return;
 		}
 
-		pi.setSessionName(result.title);
+		// Ours before it is set: Pi reports the change while setting it.
 		state.titledByMe = result.title;
+		pi.setSessionName(result.title);
 	} finally {
 		state.inFlight = false;
 	}
@@ -402,9 +437,26 @@ function recordGeneration(
 	pi.appendEntry("pi-auto-title", record);
 }
 
+/** The last title this extension applied in this session, if any. */
+function lastAppliedTitle(ctx: ExtensionContext): string | null {
+	let found: string | null = null;
+	for (const record of generationRecords(ctx)) {
+		if (record.applied && record.title) {
+			found = record.title;
+		}
+	}
+
+	return found;
+}
+
 /** The most recent generation record in this session, if any. */
 function lastRecord(ctx: ExtensionContext): TitleRecord | null {
-	let found: TitleRecord | null = null;
+	return generationRecords(ctx).at(-1) ?? null;
+}
+
+/** Every generation record in the session file, oldest first. */
+function generationRecords(ctx: ExtensionContext): TitleRecord[] {
+	const records: TitleRecord[] = [];
 	for (const entry of ctx.sessionManager.getEntries()) {
 		const candidate = entry as {
 			type?: string;
@@ -412,20 +464,23 @@ function lastRecord(ctx: ExtensionContext): TitleRecord | null {
 			data?: TitleRecord;
 		};
 
-		if (candidate.type === "custom" && candidate.customType === "pi-auto-title") {
-			found = candidate.data ?? found;
+		if (candidate.type === "custom" && candidate.customType === "pi-auto-title" && candidate.data) {
+			records.push(candidate.data);
 		}
 	}
 
-	return found;
+	return records;
 }
 
-/** The first user prompt and the first assistant reply, bounded in size. */
-function conversationExcerpt(ctx: ExtensionContext): { prompt: string; reply?: string } {
-	let prompt = "";
-	let reply: string | undefined;
+/**
+ * How the session started and its latest exchange, on the branch in use,
+ * each a user prompt and the last text the agent answered it with,
+ * bounded in size. Null before there is a prompt.
+ */
+function conversationExcerpt(ctx: ExtensionContext): { first: Exchange; latest?: Exchange } | null {
+	const exchanges: Exchange[] = [];
 
-	for (const raw of ctx.sessionManager.getEntries()) {
+	for (const raw of ctx.sessionManager.getBranch()) {
 		const entry = raw as {
 			type?: string;
 			message?: { role?: string; content?: unknown };
@@ -435,18 +490,25 @@ function conversationExcerpt(ctx: ExtensionContext): { prompt: string; reply?: s
 			continue;
 		}
 
-		if (entry.message?.role === "user" && prompt === "") {
-			prompt = blockText(entry.message.content).slice(0, PROMPT_MAX_CHARS);
-		} else if (entry.message?.role === "assistant" && reply === undefined) {
-			reply = blockText(entry.message.content).slice(0, REPLY_MAX_CHARS);
+		const text = blockText(entry.message?.content).trim();
+		if (text === "") {
+			continue;
 		}
 
-		if (prompt !== "" && reply !== undefined) {
-			break;
+		if (entry.message?.role === "user") {
+			exchanges.push({ prompt: text.slice(0, PROMPT_MAX_CHARS) });
+		} else if (entry.message?.role === "assistant" && exchanges.length > 0) {
+			exchanges[exchanges.length - 1].reply = text.slice(0, REPLY_MAX_CHARS);
 		}
 	}
 
-	return { prompt, reply };
+	if (exchanges.length === 0) {
+		return null;
+	}
+
+	return exchanges.length === 1
+		? { first: exchanges[0] }
+		: { first: exchanges[0], latest: exchanges[exchanges.length - 1] };
 }
 
 function blockText(content: unknown): string {
