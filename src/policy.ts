@@ -186,8 +186,8 @@ export function titleWords(value: string | undefined): number {
 }
 
 /**
- * Whether to title again after every settled turn ("turn", the default)
- * or only after the first one ("once"). Anything else means the default.
+ * Whether to title again on every submitted prompt ("turn", the default)
+ * or only on the first one ("once"). Anything else means the default.
  */
 export function updatesEveryTurn(value: string | undefined): boolean {
 	return value?.trim().toLowerCase() !== "once";

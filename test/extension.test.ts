@@ -73,8 +73,22 @@ function fakeSession(titles: string[], entries: Entry[] = []) {
 		},
 		/** The user names the session, as /name does. */
 		rename: setName,
-		/** One turn: a prompt, the agent's answer, then the agent settles. */
+		/**
+		 * The user submits a prompt: the run starts before the prompt is in
+		 * the session. Resolves once any titling it started has finished.
+		 */
+		async submit(prompt: string) {
+			emit("before_agent_start", { type: "before_agent_start", messageType: "user", prompt });
+			await new Promise((resolve) => setImmediate(resolve));
+		},
+		/** A run started by a custom message, not by a prompt. */
+		async custom() {
+			emit("before_agent_start", { type: "before_agent_start", messageType: "custom", message: {} });
+			await new Promise((resolve) => setImmediate(resolve));
+		},
+		/** One turn: a prompt is submitted, then the agent answers it. */
 		async turn(prompt: string, reply: string) {
+			await this.submit(prompt);
 			entries.push(
 				{ type: "message", message: { role: "user", content: prompt } },
 				{ type: "message", message: { role: "assistant", content: [{ type: "text", text: reply }] } },
@@ -121,23 +135,40 @@ describe("titling over a session", () => {
 		rmSync(dir, { recursive: true, force: true });
 	});
 
-	it("titles a session after its first turn", async () => {
+	it("titles a session as soon as its first prompt is submitted", async () => {
 		const session = fakeSession(["Login fix"]);
-		await session.turn("Fix the login form", "Fixed the validation");
+		await session.submit("Fix the login form");
 
 		assert.equal(session.name, "Login fix");
-		assert.match(session.requests[0].user, /^Conversation to title:/);
+		assert.equal(session.requests[0].user, "Conversation to title:\n\nUser: Fix the login form");
 		assert.doesNotMatch(session.requests[0].systemPrompt ?? "", /current title/);
 	});
 
-	it("updates the title after later turns, from the latest exchange", async () => {
+	it("does not title again when the agent settles", async () => {
+		const session = fakeSession(["Login fix", "Other"]);
+		await session.turn("Fix the login form", "Fixed the validation");
+
+		assert.equal(session.name, "Login fix");
+		assert.equal(session.requests.length, 1);
+	});
+
+	it("ignores runs started by custom messages", async () => {
+		const session = fakeSession(["Login fix"]);
+		await session.custom();
+
+		assert.equal(session.name, undefined);
+		assert.equal(session.requests.length, 0);
+	});
+
+	it("updates the title on later prompts, from the new prompt", async () => {
 		const session = fakeSession(["Login fix", "Signup form"]);
 		await session.turn("Fix the login form", "Fixed the validation");
-		await session.turn("Now the signup form", "Rebuilt it");
+		await session.submit("Now the signup form");
 
 		assert.equal(session.name, "Signup form");
 		assert.match(session.requests[1].user, /^Current title: Login fix/);
-		assert.match(session.requests[1].user, /Latest exchange:\n\nUser: Now the signup form/);
+		assert.match(session.requests[1].user, /How the session started:\n\nUser: Fix the login form\n\n/);
+		assert.match(session.requests[1].user, /Latest exchange:\n\nUser: Now the signup form$/);
 		assert.match(session.requests[1].systemPrompt ?? "", /current title unchanged if it still fits/);
 	});
 

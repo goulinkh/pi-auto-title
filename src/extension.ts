@@ -60,14 +60,16 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
-	// The agent has finished its turn: the reply is delivered and nothing is
-	// blocked anymore. The promise is deliberately not returned to Pi.
-	pi.on("agent_settled", (event, ctx) => {
-		if (event.aborted || !isEnabled(process.env[ENABLE_ENV])) {
+	// A prompt was just submitted and its run is starting: title now, next to
+	// the agent's own request. Pi awaits before_agent_start handlers, so the
+	// promise is deliberately not returned — the prompt never waits on a title.
+	// Runs started by custom messages carry no prompt and are not titled.
+	pi.on("before_agent_start", (event, ctx) => {
+		if (event.messageType !== "user" || !isEnabled(process.env[ENABLE_ENV])) {
 			return;
 		}
 
-		void settleTitling(pi, ctx, state).catch(() => {});
+		void promptTitling(pi, ctx, state, event.prompt).catch(() => {});
 	});
 
 	// A name that is not ours means the user took over: stand down for the
@@ -284,7 +286,7 @@ function preferenceInput(): { modelOverride?: string; language?: string; words?:
 	return { modelOverride: prefs.model, language: prefs.language, words: prefs.words };
 }
 
-/** Whether titles update after every turn: environment over config file. */
+/** Whether titles update on every prompt: environment over config file. */
 function titlesEveryTurn(): boolean {
 	return updatesEveryTurn(resolvePreferences({ update: process.env[UPDATE_ENV] }, loadPreferences()).update);
 }
@@ -328,20 +330,22 @@ function wordsStatus(): string {
 }
 
 function updateStatus(): string {
-	const when = titlesEveryTurn() ? "after every turn" : "once, after the first turn";
+	const when = titlesEveryTurn() ? "on every prompt" : "once, on the first prompt";
 
 	return `Title updates: ${when} (from ${preferenceSource("update")})`;
 }
 
 /**
- * Title an unnamed session after its first settled turn and, unless the
- * preference says once, update that title after every later one. A name
- * this extension didn't give is never touched.
+ * Title an unnamed session as soon as its first prompt is submitted and,
+ * unless the preference says once, update that title on every later
+ * prompt. A name this extension didn't give is never touched. `prompt`
+ * is the submitted text, not yet in the session when the run starts.
  */
-async function settleTitling(
+async function promptTitling(
 	pi: ExtensionAPI,
 	ctx: ExtensionContext,
 	state: TitlerState,
+	prompt: string,
 ): Promise<void> {
 	if (state.stoodDown || state.inFlight) {
 		return;
@@ -356,7 +360,12 @@ async function settleTitling(
 		return;
 	}
 
-	const excerpt = conversationExcerpt(ctx);
+	// An image-only prompt says nothing new to title from.
+	if (prompt.trim() === "") {
+		return;
+	}
+
+	const excerpt = conversationExcerpt(ctx, prompt);
 	if (!excerpt) {
 		return;
 	}
@@ -475,9 +484,14 @@ function generationRecords(ctx: ExtensionContext): TitleRecord[] {
 /**
  * How the session started and its latest exchange, on the branch in use,
  * each a user prompt and the last text the agent answered it with,
- * bounded in size. Null before there is a prompt.
+ * bounded in size. `pending` is a submitted prompt not yet in the session;
+ * it becomes the latest exchange, with no reply yet. Null before there is
+ * a prompt.
  */
-function conversationExcerpt(ctx: ExtensionContext): { first: Exchange; latest?: Exchange } | null {
+function conversationExcerpt(
+	ctx: ExtensionContext,
+	pending?: string,
+): { first: Exchange; latest?: Exchange } | null {
 	const exchanges: Exchange[] = [];
 
 	for (const raw of ctx.sessionManager.getBranch()) {
@@ -500,6 +514,11 @@ function conversationExcerpt(ctx: ExtensionContext): { first: Exchange; latest?:
 		} else if (entry.message?.role === "assistant" && exchanges.length > 0) {
 			exchanges[exchanges.length - 1].reply = text.slice(0, REPLY_MAX_CHARS);
 		}
+	}
+
+	const submitted = pending?.trim();
+	if (submitted) {
+		exchanges.push({ prompt: submitted.slice(0, PROMPT_MAX_CHARS) });
 	}
 
 	if (exchanges.length === 0) {

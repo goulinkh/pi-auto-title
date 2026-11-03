@@ -2,13 +2,13 @@
 
 Gives an unnamed Pi session a name, without ever getting in the way.
 
-The extension waits until the agent's first turn has settled — the reply is
-already on screen — and only then asks a model for a short title from the
-opening exchange. After every later turn it updates the title to what the
-session is working on now, keeping it when it still fits. No message is
-ever delayed, blocked, or rewritten. Titles are short (the model is asked
-for at most 4 words by default), so they still fit where a terminal shows
-its title, such as a tab.
+The moment you submit the first prompt, the extension asks a model for a
+short title from it, in parallel with the agent's own request — the prompt
+itself never waits for the title. On every later prompt it updates the
+title to what the session is working on now, keeping it when it still
+fits. No message is ever delayed, blocked, or rewritten. Titles are short
+(the model is asked for at most 4 words by default), so they still fit
+where a terminal shows its title, such as a tab.
 
 ## Install
 
@@ -19,12 +19,14 @@ pi install npm:pi-auto-title
 ## Why not in the message path
 
 Some auto-title extensions generate the name inside `input` or
-`before_agent_start`, which means every first message of every session waits
-for an extra model round-trip before the agent even sees it. This extension
-hooks `agent_settled` instead: by the time it does anything, the turn it
-names is already over. Updating after every turn costs one small model call
-per turn; `/title-model` can point it at a cheap model, and the `update`
-preference can turn it off. Generation failures are silent — a session that cannot
+`before_agent_start` and wait for it, which means every first message of
+every session waits for an extra model round-trip before the agent even
+sees it. This extension also starts on `before_agent_start`, so the title
+appears right after you submit, but it never hands its promise back to Pi:
+the title request runs alongside the agent's, and the agent starts at
+once. Updating on every prompt costs one small model call per prompt;
+`/title-model` can point it at a cheap model, and the `update` preference
+can turn it off. Generation failures are silent — a session that cannot
 be titled keeps whatever name it has, including none.
 
 ## Behavior
@@ -33,10 +35,12 @@ be titled keeps whatever name it has, including none.
   and names a resumed session got elsewhere are all respected. A resumed
   session this extension titled (its generation records say so) keeps
   being updated.
-- An unnamed session is titled after its first settled turn. After every
-  later one, the model sees the current title, the opening prompt and the
-  latest exchange, and keeps the title unless the work has moved on. With
-  `"update": "once"` the first title stays.
+- An unnamed session is titled as soon as its first prompt is submitted,
+  from that prompt alone. On every later prompt, the model sees the
+  current title, the opening exchange and the new prompt, and keeps the
+  title unless the work has moved on. With `"update": "once"` the first
+  title stays. Runs started by extension messages rather than a prompt,
+  and image-only prompts, are not titled.
 - If you rename the session yourself afterwards, the extension stands down
   for the rest of that session and never touches the name again.
 - `/retitle` regenerates the title on demand, even after you renamed the
@@ -67,7 +71,7 @@ These commands set the persistent preferences from inside Pi:
 - `/title-status` — show the preferences in effect and the most
   recent generation record in this session.
 
-When titles update — after every turn, or once — is set in the config
+When titles update — on every prompt, or once — is set in the config
 file or the environment only (`update` below).
 
 ## Generation records
@@ -94,7 +98,7 @@ re-read whenever a title is generated. If the file is a symlink (kept
 in a dotfiles repository, say), the commands write through it and
 leave the link in place. Resolution is key by key:
 an environment variable beats the config file, which beats the
-default (the session model; the conversation's language; 4 words; every turn).
+default (the session model; the conversation's language; 4 words; every prompt).
 
 | Variable                 | Default | Description                                                        |
 | ------------------------ | ------- | ------------------------------------------------------------------ |
@@ -102,7 +106,7 @@ default (the session model; the conversation's language; 4 words; every turn).
 | `PI_AUTO_TITLE_MODEL`    | unset   | `provider/model-id` to title with; overrides the config file.      |
 | `PI_AUTO_TITLE_LANGUAGE` | unset   | Language to title in (`en`, `zh`, `Japanese`, …); overrides the config file. |
 | `PI_AUTO_TITLE_WORDS`    | `4`     | Most words the model is asked to use; overrides the config file.   |
-| `PI_AUTO_TITLE_UPDATE`   | `turn`  | `turn` updates the title after every turn, `once` titles only after the first; overrides the config file. |
+| `PI_AUTO_TITLE_UPDATE`   | `turn`  | `turn` updates the title on every prompt, `once` titles only on the first; overrides the config file. |
 | `PI_AUTO_TITLE_MAX_LENGTH` | `60`  | Hard cap on title length in characters, cut mid-word if reached.   |
 
 ## Development

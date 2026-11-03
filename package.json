@@ -1,6 +1,6 @@
 {
   "author": "himicoswilson",
-  "description": "Non-blocking auto-titles for Pi sessions: named after the first turn settles, never in the message path.",
+  "description": "Non-blocking auto-titles for Pi sessions: named as soon as the first prompt is submitted, never in the message path.",
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^1.3.0",
     "@earendil-works/pi-tui": "^1.3.0",
