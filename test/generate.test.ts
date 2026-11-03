@@ -14,13 +14,22 @@ describe("titleSystemPrompt", () => {
 		assert.match(prompt, /Write the title in Japanese\./);
 		assert.doesNotMatch(prompt, /same language/);
 	});
+
+	it("asks for at most 4 words by default", () => {
+		assert.match(titleSystemPrompt(null), /at most 4 words/);
+	});
+
+	it("asks for the configured number of words", () => {
+		assert.match(titleSystemPrompt(null, 6), /at most 6 words/);
+		assert.match(titleSystemPrompt("English", 1), /a single word/);
+	});
 });
 
 /** A minimal stand-in for the parts of Pi's context generation touches. */
 function fakeContext(options: {
 	models?: Record<string, { auth: boolean }>;
 	sessionModel?: string;
-	respond?: () => unknown;
+	respond?: (request: { systemPrompt?: string }) => unknown;
 }): ExtensionContext {
 	const find = (provider: string, id: string) => {
 		const ref = `${provider}/${id}`;
@@ -33,12 +42,12 @@ function fakeContext(options: {
 		find,
 		hasConfiguredAuth: (model: { provider: string; id: string }) =>
 			options.models?.[`${model.provider}/${model.id}`]?.auth ?? false,
-		complete: async () => {
+		complete: async (_model: unknown, request: { systemPrompt?: string }) => {
 			if (!options.respond) {
 				throw new Error("no response stubbed");
 			}
 
-			return options.respond();
+			return options.respond(request);
 		},
 	};
 
@@ -107,6 +116,25 @@ describe("generateTitle outcomes", () => {
 		assert.equal(result.respondedBy, "mock/mock-1-2026");
 		assert.equal(result.responseId, "resp-42");
 		assert.equal(result.failure, null);
+	});
+
+	it("asks the model for the configured number of words", async () => {
+		let systemPrompt: string | undefined;
+		const ctx = fakeContext({
+			models: { "mock/mock-1": { auth: true } },
+			respond: (request) => {
+				systemPrompt = request.systemPrompt;
+				return { content: [{ type: "text", text: "Tab titles" }], provider: "mock", model: "mock-1" };
+			},
+		});
+		const result = await generateTitle(ctx, {
+			promptText: "hello",
+			modelOverride: "mock/mock-1",
+			words: "2",
+		});
+
+		assert.equal(result.title, "Tab titles");
+		assert.match(systemPrompt ?? "", /at most 2 words/);
 	});
 
 	it("names a failed request instead of throwing", async () => {

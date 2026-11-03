@@ -5,26 +5,31 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+	DEFAULT_WORDS,
 	GENERATE_MAX_TOKENS,
 	GENERATE_TIMEOUT_MS,
 	languageName,
 	maxLengthFromEnv,
 	parseModelRef,
 	sanitizeTitle,
+	titleWords,
 } from "./policy.ts";
 
 /**
  * The instruction the titling model works under. A named language pins
  * the title's language; null leaves it to follow the conversation.
+ * `words` is the most words the title may have.
  */
-export function titleSystemPrompt(language: string | null): string {
+export function titleSystemPrompt(language: string | null, words: number = DEFAULT_WORDS): string {
 	const inLanguage = language
 		? `Write the title in ${language}.`
 		: "Use the same language as the user's message.";
+	const length = words === 1 ? "a single word" : `at most ${words} words`;
 
 	return (
-		"Name this chat session. Reply with ONLY a short title, at most " +
-		`about 8 words long. ${inLanguage} ` +
+		`Name this chat session. Reply with ONLY a title of ${length}; ` +
+		"count them, never more. Write it like a tab label: the fewest " +
+		`words that say what the work is, without articles or filler. ${inLanguage} ` +
 		"No quotation marks, no trailing punctuation, no explanation."
 	);
 }
@@ -35,6 +40,8 @@ export interface GenerateInput {
 	modelOverride?: string;
 	/** Raw language preference; normalized by languageName. */
 	language?: string;
+	/** Raw word limit; read with titleWords. */
+	words?: string;
 }
 
 /** Why a generation produced no title, in words a log can carry. */
@@ -89,7 +96,7 @@ export async function generateTitle(
 		const response = await ctx.modelRegistry.complete(
 			model,
 			{
-				systemPrompt: titleSystemPrompt(languageName(input.language)),
+				systemPrompt: titleSystemPrompt(languageName(input.language), titleWords(input.words)),
 				messages: [
 					{
 						role: "user",

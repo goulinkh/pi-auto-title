@@ -3,7 +3,7 @@
 // Reads are tolerant — a missing or malformed file is no preferences at
 // all — and writes are atomic, so a crash mid-write keeps the old file.
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { TitlePreferences } from "./policy.ts";
@@ -21,7 +21,7 @@ export function configPath(): string {
 
 /** The preferences the config file states, or none when it says nothing usable. */
 export function loadPreferences(): TitlePreferences {
-	const none: TitlePreferences = { model: undefined, language: undefined };
+	const none: TitlePreferences = { model: undefined, language: undefined, words: undefined };
 
 	try {
 		const parsed: unknown = JSON.parse(readFileSync(configPath(), "utf8"));
@@ -33,6 +33,7 @@ export function loadPreferences(): TitlePreferences {
 		return {
 			model: asWritten(record.model),
 			language: asWritten(record.language),
+			words: asWritten(typeof record.words === "number" ? String(record.words) : record.words),
 		};
 	} catch {
 		return none;
@@ -47,7 +48,7 @@ export function loadPreferences(): TitlePreferences {
 export function savePreferences(patch: TitlePreferences): TitlePreferences {
 	const next: TitlePreferences = { ...loadPreferences() };
 
-	for (const key of ["model", "language"] as const) {
+	for (const key of ["model", "language", "words"] as const) {
 		if (key in patch) {
 			const value = patch[key]?.trim();
 			if (value) {
@@ -58,16 +59,23 @@ export function savePreferences(patch: TitlePreferences): TitlePreferences {
 		}
 	}
 
-	const path = configPath();
+	// Write through a symlink (a config kept in a dotfiles repo) rather than
+	// replacing the link with a plain file.
+	const path = existsSync(configPath()) ? realpathSync(configPath()) : configPath();
 	mkdirSync(join(path, ".."), { recursive: true });
 
-	const written: Record<string, string> = {};
+	const written: Record<string, string | number> = {};
 	if (next.model) {
 		written.model = next.model;
 	}
 
 	if (next.language) {
 		written.language = next.language;
+	}
+
+	if (next.words) {
+		const words = Number(next.words);
+		written.words = Number.isFinite(words) ? words : next.words;
 	}
 
 	const temp = `${path}.tmp-${process.pid}`;

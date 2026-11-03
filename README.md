@@ -5,6 +5,8 @@ Gives an unnamed Pi session a name, without ever getting in the way.
 The extension waits until the agent's first turn has settled — the reply is
 already on screen — and only then asks a model for a short title from the
 opening exchange. The first message is never delayed, blocked, or rewritten.
+Titles are short (the model is asked for at most 4 words by default), so
+they still fit where a terminal shows its title, such as a tab.
 
 ## Install
 
@@ -38,7 +40,7 @@ be titled keeps whatever name it has, including none.
 
 ## Configuration
 
-Two commands set the persistent preferences from inside Pi:
+These commands set the persistent preferences from inside Pi:
 
 - `/title-model` — pick the model titles are generated with in a
   searchable picker styled after Pi's own `/model` page (type to
@@ -49,6 +51,10 @@ Two commands set the persistent preferences from inside Pi:
   it as `/title-language zh`; `auto` (or `clear`) matches the
   conversation again. Any language name may be written in the config
   file directly.
+- `/title-words` — show how many words titles are asked to stay
+  within, or set it with `/title-words 3`; `clear` returns to the
+  default of 4. It is what the model is asked for, not a hard cut:
+  `PI_AUTO_TITLE_MAX_LENGTH` is the hard cap.
 - `/title-status` — show the preferences in effect and the most
   recent generation record in this session.
 
@@ -68,20 +74,23 @@ Choices are stored in the extension's own file,
 Pi's `settings.json`:
 
 ```json
-{ "model": "openrouter/deepseek/deepseek-chat", "language": "en" }
+{ "model": "openrouter/deepseek/deepseek-chat", "language": "en", "words": 3 }
 ```
 
-Both keys are optional, and the file may be edited by hand — it is
-re-read whenever a title is generated. Resolution is key by key:
+Every key is optional, and the file may be edited by hand — it is
+re-read whenever a title is generated. If the file is a symlink (kept
+in a dotfiles repository, say), the commands write through it and
+leave the link in place. Resolution is key by key:
 an environment variable beats the config file, which beats the
-default (the session model; the conversation's language).
+default (the session model; the conversation's language; 4 words).
 
 | Variable                 | Default | Description                                                        |
 | ------------------------ | ------- | ------------------------------------------------------------------ |
 | `PI_AUTO_TITLE`          | on      | Set to `0`, `false`, `off`, or `no` to disable titling entirely.   |
 | `PI_AUTO_TITLE_MODEL`    | unset   | `provider/model-id` to title with; overrides the config file.      |
 | `PI_AUTO_TITLE_LANGUAGE` | unset   | Language to title in (`en`, `zh`, `Japanese`, …); overrides the config file. |
-| `PI_AUTO_TITLE_MAX_LENGTH` | `60`  | Maximum title length in characters.                                |
+| `PI_AUTO_TITLE_WORDS`    | `4`     | Most words the model is asked to use; overrides the config file.   |
+| `PI_AUTO_TITLE_MAX_LENGTH` | `60`  | Hard cap on title length in characters, cut mid-word if reached.   |
 
 ## Development
 

@@ -15,11 +15,20 @@ import {
 	REPLY_MAX_CHARS,
 	resolvePreferences,
 	type TitlePreferences,
+	titleWords,
 } from "./policy.ts";
 
 const ENABLE_ENV = "PI_AUTO_TITLE";
 const MODEL_ENV = "PI_AUTO_TITLE_MODEL";
 const LANGUAGE_ENV = "PI_AUTO_TITLE_LANGUAGE";
+const WORDS_ENV = "PI_AUTO_TITLE_WORDS";
+
+/** The environment variable that states each preference. */
+const PREFERENCE_ENV: Record<keyof TitlePreferences, string> = {
+	model: MODEL_ENV,
+	language: LANGUAGE_ENV,
+	words: WORDS_ENV,
+};
 
 /** Per-session state. Reset whenever a session starts. */
 interface TitlerState {
@@ -160,7 +169,7 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("title-status", {
 		description: "Show the titling preferences and the last generation record",
 		handler: async (_args, ctx) => {
-			const lines = [modelStatus(), languageStatus(), `Config file: ${configPath()}`];
+			const lines = [modelStatus(), languageStatus(), wordsStatus(), `Config file: ${configPath()}`];
 			const record = lastRecord(ctx);
 
 			if (!record) {
@@ -221,22 +230,51 @@ export default function (pi: ExtensionAPI) {
 			ctx.ui.notify(`Title language: ${picked} (${configPath()}).`, "info");
 		},
 	});
+
+	pi.registerCommand("title-words", {
+		description: "Show or set how many words titles stay within",
+		handler: async (args, ctx) => {
+			const written = args.trim();
+
+			if (written === "clear") {
+				savePreferences({ words: undefined });
+				ctx.ui.notify(`Title words cleared; titles stay within ${titleWords(undefined)} words.`, "info");
+				return;
+			}
+
+			if (written === "") {
+				ctx.ui.notify(`${wordsStatus()}\nSet it with /title-words <number>, or clear.`, "info");
+				return;
+			}
+
+			if (!/^\d+$/.test(written) || Number(written) < 1) {
+				ctx.ui.notify(`Not a number of words: ${written}`, "warning");
+				return;
+			}
+
+			savePreferences({ words: written });
+			ctx.ui.notify(`Titles stay within ${Number(written)} words (${configPath()}).`, "info");
+		},
+	});
 }
 
 /** The preferences generation runs under: environment over config file. */
-function preferenceInput(): { modelOverride?: string; language?: string } {
+function preferenceInput(): { modelOverride?: string; language?: string; words?: string } {
 	const prefs = resolvePreferences(
-		{ model: process.env[MODEL_ENV], language: process.env[LANGUAGE_ENV] },
+		{
+			model: process.env[MODEL_ENV],
+			language: process.env[LANGUAGE_ENV],
+			words: process.env[WORDS_ENV],
+		},
 		loadPreferences(),
 	);
 
-	return { modelOverride: prefs.model, language: prefs.language };
+	return { modelOverride: prefs.model, language: prefs.language, words: prefs.words };
 }
 
 /** Which layer states a preference: the environment, the file, or neither. */
 function preferenceSource(key: keyof TitlePreferences): string {
-	const env = key === "model" ? process.env[MODEL_ENV] : process.env[LANGUAGE_ENV];
-	if (env?.trim()) {
+	if (process.env[PREFERENCE_ENV[key]]?.trim()) {
 		return "environment";
 	}
 
@@ -264,6 +302,12 @@ function languageStatus(): string {
 	return name
 		? `Title language: ${name} (from ${preferenceSource("language")})`
 		: "Title language: auto (matches the conversation)";
+}
+
+function wordsStatus(): string {
+	const prefs = resolvePreferences({ words: process.env[WORDS_ENV] }, loadPreferences());
+
+	return `Title words: at most ${titleWords(prefs.words)} (from ${preferenceSource("words")})`;
 }
 
 /** Title once, after the first settled turn, then never again on its own. */

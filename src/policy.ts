@@ -3,6 +3,8 @@
 // it is unit-tested rather than live-tested.
 
 export const DEFAULT_MAX_LENGTH = 60;
+/** How many words a title may have unless configured otherwise. */
+export const DEFAULT_WORDS = 4;
 export const PROMPT_MAX_CHARS = 1500;
 export const REPLY_MAX_CHARS = 500;
 export const GENERATE_TIMEOUT_MS = 15_000;
@@ -97,6 +99,8 @@ export function isEnabled(value: string | undefined): boolean {
 export interface TitlePreferences {
 	model?: string;
 	language?: string;
+	/** The most words a title may have, as written; read with titleWords. */
+	words?: string;
 }
 
 /**
@@ -112,7 +116,11 @@ export function resolvePreferences(
 		return value?.trim();
 	};
 
-	return { model: pick(higher.model, lower.model), language: pick(higher.language, lower.language) };
+	return {
+		model: pick(higher.model, lower.model),
+		language: pick(higher.language, lower.language),
+		words: pick(higher.words, lower.words),
+	};
 }
 
 /** The stored spelling for each language the picker offers. */
@@ -163,14 +171,23 @@ export function languageName(value: string | undefined): string | null {
 
 /** Maximum title length from the environment, with a sane fallback. */
 export function maxLengthFromEnv(value: string | undefined): number {
-	if (value === undefined) {
-		return DEFAULT_MAX_LENGTH;
+	return positiveInteger(value) ?? DEFAULT_MAX_LENGTH;
+}
+
+/**
+ * The most words a title may have, from a written preference. Unset,
+ * blank, or anything but a positive number means the default.
+ */
+export function titleWords(value: string | undefined): number {
+	return positiveInteger(value) ?? DEFAULT_WORDS;
+}
+
+/** A written number rounded down, or null when it is not a positive one. */
+function positiveInteger(value: string | undefined): number | null {
+	if (value === undefined || value.trim() === "") {
+		return null;
 	}
 
 	const n = Math.floor(Number(value));
-	if (!Number.isFinite(n) || n <= 0) {
-		return DEFAULT_MAX_LENGTH;
-	}
-
-	return n;
+	return Number.isFinite(n) && n > 0 ? n : null;
 }

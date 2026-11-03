@@ -7,6 +7,7 @@ import {
 	parseModelRef,
 	resolvePreferences,
 	sanitizeTitle,
+	titleWords,
 } from "../src/policy.ts";
 
 describe("sanitizeTitle", () => {
@@ -107,6 +108,22 @@ describe("maxLengthFromEnv", () => {
 	});
 });
 
+describe("titleWords", () => {
+	it("falls back to 4 when unset or invalid", () => {
+		assert.equal(titleWords(undefined), 4);
+		assert.equal(titleWords(""), 4);
+		assert.equal(titleWords("many"), 4);
+		assert.equal(titleWords("0"), 4);
+		assert.equal(titleWords("-2"), 4);
+	});
+
+	it("parses a positive number of words", () => {
+		assert.equal(titleWords("3"), 3);
+		assert.equal(titleWords(" 6 "), 6);
+		assert.equal(titleWords("2.7"), 2);
+	});
+});
+
 describe("languageName", () => {
 	it("leaves unset and auto to the conversation", () => {
 		assert.equal(languageName(undefined), null);
@@ -137,18 +154,23 @@ describe("resolvePreferences", () => {
 				{ model: "a/b" },
 				{ model: "c/d", language: "zh" },
 			),
-			{ model: "a/b", language: "zh" },
+			{ model: "a/b", language: "zh", words: undefined },
+		);
+		assert.deepEqual(
+			resolvePreferences({ words: "2" }, { words: "5", language: "en" }),
+			{ model: undefined, language: "en", words: "2" },
 		);
 	});
 
 	it("treats blank values as unset", () => {
 		assert.deepEqual(
 			resolvePreferences({ language: "  " }, { language: "en" }),
-			{ model: undefined, language: "en" },
+			{ model: undefined, language: "en", words: undefined },
 		);
 		assert.deepEqual(resolvePreferences({}, {}), {
 			model: undefined,
 			language: undefined,
+			words: undefined,
 		});
 	});
 });
